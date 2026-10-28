@@ -1,0 +1,666 @@
+[
+  {
+    "name": "pigquality_type",
+    "columns": [
+      {
+        "name": "root_id",
+        "jdbcType": 4,
+        "dbTypeName": "int4",
+        "scale": 0,
+        "precision": 10
+      },
+      {
+        "name": "code",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 15
+      },
+      {
+        "name": "name",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 30
+      },
+      {
+        "name": "description",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 300
+      },
+      {
+        "name": "qualitysystem",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 30
+      },
+      {
+        "name": "condemned",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "create_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "create_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      },
+      {
+        "name": "update_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "update_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      }
+    ],
+    "key": [
+      "root_id",
+      "code"
+    ]
+  },
+  {
+    "name": "group_defect_type",
+    "columns": [
+      {
+        "name": "root_id",
+        "jdbcType": 4,
+        "dbTypeName": "int4",
+        "scale": 0,
+        "precision": 10
+      },
+      {
+        "name": "code",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 15
+      },
+      {
+        "name": "description",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 300
+      },
+      {
+        "name": "create_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "create_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      },
+      {
+        "name": "update_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "update_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      }
+    ],
+    "key": [
+      "root_id",
+      "code"
+    ]
+  },
+  {
+    "name": "death_type",
+    "columns": [
+      {
+        "name": "root_id",
+        "jdbcType": 4,
+        "dbTypeName": "int4",
+        "scale": 0,
+        "precision": 10
+      },
+      {
+        "name": "code",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 15
+      },
+      {
+        "name": "description",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 300
+      },
+      {
+        "name": "externalcode",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 15
+      },
+      {
+        "name": "domestic_slaughter",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "domestic_disposal",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "stolen",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "euthanasia",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "create_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "create_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      },
+      {
+        "name": "update_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "update_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      }
+    ],
+    "key": [
+      "root_id",
+      "code"
+    ]
+  },
+  {
+    "name": "illness_type",
+    "columns": [
+      {
+        "name": "root_id",
+        "jdbcType": 4,
+        "dbTypeName": "int4",
+        "scale": 0,
+        "precision": 10
+      },
+      {
+        "name": "code",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 15
+      },
+      {
+        "name": "description",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 300
+      },
+      {
+        "name": "reason_of_death",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "reason_of_lost_pregnancy",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "abortion",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "curable",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "for_sow",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "for_boar",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "for_suckling",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "for_young_animal",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "for_weaner",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "for_finisher",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "reason_of_sale",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "in_heat",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "comment",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 300
+      },
+      {
+        "name": "create_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "create_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      },
+      {
+        "name": "update_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "update_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      },
+      {
+        "name": "reason_for_early_farrowing_movement",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "reason_for_confinement",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      }
+    ],
+    "key": [
+      "root_id",
+      "code"
+    ]
+  },
+  {
+    "name": "account",
+    "columns": [
+      {
+        "name": "id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      },
+      {
+        "name": "email",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 50
+      },
+      {
+        "name": "abbr",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 10
+      },
+      {
+        "name": "name",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 50
+      }
+    ],
+    "key": [
+      "id"
+    ]
+  },
+  {
+    "name": "feed_type",
+    "columns": [
+      {
+        "name": "root_id",
+        "jdbcType": 4,
+        "dbTypeName": "int4",
+        "scale": 0,
+        "precision": 10
+      },
+      {
+        "name": "feed_name",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 60
+      },
+      {
+        "name": "valid_from",
+        "jdbcType": 91,
+        "dbTypeName": "date",
+        "scale": 0,
+        "precision": 13
+      },
+      {
+        "name": "valid_to",
+        "jdbcType": 91,
+        "dbTypeName": "date",
+        "scale": 0,
+        "precision": 13
+      },
+      {
+        "name": "min_weight",
+        "jdbcType": 2,
+        "dbTypeName": "numeric",
+        "scale": 2,
+        "precision": 6
+      },
+      {
+        "name": "max_weight",
+        "jdbcType": 2,
+        "dbTypeName": "numeric",
+        "scale": 2,
+        "precision": 6
+      },
+      {
+        "name": "piglet",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "weaner",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "fattener",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "sow",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "gilt",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "boar",
+        "jdbcType": -7,
+        "dbTypeName": "bool",
+        "scale": 0,
+        "precision": 1
+      },
+      {
+        "name": "piglet_mix_ratio",
+        "jdbcType": 2,
+        "dbTypeName": "numeric",
+        "scale": 2,
+        "precision": 5
+      },
+      {
+        "name": "weaner_mix_ratio",
+        "jdbcType": 2,
+        "dbTypeName": "numeric",
+        "scale": 2,
+        "precision": 5
+      },
+      {
+        "name": "finisher_mix_ratio",
+        "jdbcType": 2,
+        "dbTypeName": "numeric",
+        "scale": 2,
+        "precision": 5
+      },
+      {
+        "name": "sow_mix_ratio",
+        "jdbcType": 2,
+        "dbTypeName": "numeric",
+        "scale": 2,
+        "precision": 5
+      },
+      {
+        "name": "gilt_mix_ratio",
+        "jdbcType": 2,
+        "dbTypeName": "numeric",
+        "scale": 2,
+        "precision": 5
+      },
+      {
+        "name": "boar_mix_ratio",
+        "jdbcType": 2,
+        "dbTypeName": "numeric",
+        "scale": 2,
+        "precision": 5
+      },
+      {
+        "name": "create_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "create_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      },
+      {
+        "name": "update_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "update_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      }
+    ],
+    "key": [
+      "root_id",
+      "feed_name"
+    ]
+  },
+  {
+    "name": "body_condition_score",
+    "columns": [
+      {
+        "name": "root_id",
+        "jdbcType": 4,
+        "dbTypeName": "int4",
+        "scale": 0,
+        "precision": 10
+      },
+      {
+        "name": "code",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 15
+      },
+      {
+        "name": "description",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 300
+      },
+      {
+        "name": "score",
+        "jdbcType": 8,
+        "dbTypeName": "float8",
+        "scale": 17,
+        "precision": 17
+      },
+      {
+        "name": "color",
+        "jdbcType": 12,
+        "dbTypeName": "varchar",
+        "scale": 0,
+        "precision": 8
+      },
+      {
+        "name": "create_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "create_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      },
+      {
+        "name": "update_date",
+        "jdbcType": 93,
+        "dbTypeName": "timestamptz",
+        "scale": 6,
+        "precision": 35
+      },
+      {
+        "name": "update_account_id",
+        "jdbcType": -5,
+        "dbTypeName": "int8",
+        "scale": 0,
+        "precision": 19
+      }
+    ],
+    "key": [
+      "root_id",
+      "code"
+    ]
+  }
+]

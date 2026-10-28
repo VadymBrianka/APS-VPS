@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Звіт по опоросах</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    .sticky-col {
+      position: sticky;
+      left: 0;
+      z-index: 10;
+      background-color: var(--tg-theme-secondary-bg-color, #ffffff);
+    }
+  </style>
+</head>
+<body class="bg-[var(--tg-theme-bg-color,#f8fafc)] text-[var(--tg-theme-text-color,#0f172a)] font-sans antialiased p-3">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const tg = window.Telegram?.WebApp;
+
+    if (tg) {
+      tg.expand();
+    }
+
+    const FARMS = [
+      { id: 1, name: "Ферма №1 (с. Настасів)" },
+      { id: 7, name: "Ферма №7 (с. Старе місто)" },
+      { id: 14, name: "Ферма №14 (с. Зарожани)" }
+    ];
+
+    function App() {
+      const [farmId, setFarmId] = useState(1);
+      const [departments, setDepartments] = useState([]);
+      const [selectedDept, setSelectedDept] = useState(null);
+      const [includeBabyroom, setIncludeBabyroom] = useState(true);
+      const [reportData, setReportData] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+
+      // Завантаження списку відділень при зміні ферми
+      useEffect(() => {
+        setLoading(true);
+        setSelectedDept(null);
+        setReportData([]);
+        setError(null);
+
+        fetch(`/api/departments?farm_id=${farmId}`)
+          .then(res => res.json())
+          .then(data => {
+            setDepartments(data);
+            if (data.length > 0) {
+              setSelectedDept(data[0].id);
+            }
+          })
+          .catch(err => setError("Помилка завантаження відділень"))
+          .finally(() => setLoading(false));
+      }, [farmId]);
+
+      // Завантаження звіту при зміні відділення або чекбоксу babyroom
+      useEffect(() => {
+        if (!selectedDept) return;
+        setLoading(true);
+        setError(null);
+
+        const url = `/api/report?farm_id=${farmId}&location_id=${selectedDept}&include_babyroom=${includeBabyroom}`;
+        fetch(url)
+          .then(res => res.json())
+          .then(data => setReportData(data))
+          .catch(err => setError("Помилка завантаження звіту"))
+          .finally(() => setLoading(false));
+      }, [selectedDept, farmId, includeBabyroom]);
+
+      const isFarm1 = farmId === 1;
+      const showBabyroomCols = isFarm1 && includeBabyroom;
+
+      return (
+        <div class="max-w-4xl mx-auto space-y-4">
+          {/* Вибір ферми */}
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-200 dark:border-slate-700">
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Ферма</label>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {FARMS.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setFarmId(f.id)}
+                  class={`px-3 py-2 text-xs font-medium rounded-lg text-left transition-all ${
+                    farmId === f.id
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200"
+                  }`}
+                >
+                  {f.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Вибір відділення та опція babyroom */}
+          {departments.length > 0 && (
+            <div class="bg-white dark:bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Відділення опоросу</label>
+                <div class="flex flex-wrap gap-2">
+                  {departments.map(d => (
+                    <button
+                      key={d.id}
+                      onClick={() => setSelectedDept(d.id)}
+                      class={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all ${
+                        selectedDept === d.id
+                          ? "bg-slate-900 text-white border-slate-900 dark:bg-blue-600 dark:border-blue-600"
+                          : "border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300"
+                      }`}
+                    >
+                      {d.locationnumber || d.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Опціональна галочка babyroom (тільки для 1 ферми) */}
+              {isFarm1 && (
+                <div class="pt-2 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                  <label htmlFor="br-checkbox" class="text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-2">
+                    <input
+                      id="br-checkbox"
+                      type="checkbox"
+                      checked={includeBabyroom}
+                      onChange={(e) => setIncludeBabyroom(e.target.checked)}
+                      class="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                    />
+                    <span>Враховувати <strong>babyroom</strong> (бейбірум та загальний підсумок)</span>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Індикатор завантаження / помилки */}
+          {loading && (
+            <div class="p-8 text-center text-sm text-slate-500">Завантаження розрахунку...</div>
+          )}
+
+          {error && (
+            <div class="p-4 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>
+          )}
+
+          {/* Таблиця звітів */}
+          {!loading && reportData.length > 0 && (
+            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs text-center border-collapse">
+                  <thead>
+                    <tr class="bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                      <th class="p-2.5 font-bold sticky-col border-r border-slate-200 dark:border-slate-700">З</th>
+                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">До</th>
+                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">Днів</th>
+                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">Поросят</th>
+                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">СМ</th>
+                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">На СМ</th>
+                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">Падіж</th>
+                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">% П</th>
+                      {showBabyroomCols && (
+                        <>
+                          <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">BR</th>
+                          <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">%BR</th>
+                          <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">ALL</th>
+                          <th class="p-2.5 font-bold">%ALL</th>
+                        </>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
+                    {reportData.map((row, idx) => (
+                      <tr key={idx} class="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                        <td class="p-2.5 font-medium sticky-col border-r border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white">
+                          {row.start_date}
+                        </td>
+                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.end_date}</td>
+                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.days}</td>
+                        <td class="p-2.5 font-semibold text-blue-600 border-r border-slate-200 dark:border-slate-700">{row.liveborn}</td>
+                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.sows}</td>
+                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.per_sow.toFixed(2)}</td>
+                        <td class="p-2.5 text-red-600 border-r border-slate-200 dark:border-slate-700">{row.deaths}</td>
+                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.death_pct.toFixed(2)}%</td>
+                        {showBabyroomCols && (
+                          <>
+                            <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.br !== null ? row.br : "-"}</td>
+                            <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.br_pct !== null ? `${row.br_pct.toFixed(2)}%` : "-"}</td>
+                            <td class="p-2.5 font-semibold text-rose-600 border-r border-slate-200 dark:border-slate-700">{row.all_deaths}</td>
+                            <td class="p-2.5 font-semibold">{row.all_death_pct.toFixed(2)}%</td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {!loading && reportData.length === 0 && selectedDept && (
+            <div class="bg-white dark:bg-slate-800 rounded-xl p-8 text-center text-slate-500 text-sm border border-slate-200 dark:border-slate-700">
+              Даних по опоросах для обраного відділення не знайдено.
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

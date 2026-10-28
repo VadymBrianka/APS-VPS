@@ -1,0 +1,46 @@
+# Секрети та конфігурації оточення (ніколи не пушити в Git!)
+.env
+.env.*
+!.env.example
+ngrok.yml
+
+# Дані та томи Docker
+pg_data/
+*/pg_data/
+caddy_data/
+caddy_config/
+*.sql
+*.tar
+*.dump
+backup.sql
+
+# Python артефакти та віртуальні середовища
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Логи та тимчасові файли
+*.log
+logs/
+*.pid
+
+# Файли операційних систем та редакторів коду
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# SSH ключі (якщо раптом будуть у папці)
+id_rsa*
+id_ed25519*
+*.pem
+*.key
