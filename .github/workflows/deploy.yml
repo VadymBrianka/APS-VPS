@@ -1,0 +1,48 @@
+name: Deploy Docker Containers to Office VPS
+
+on:
+  push:
+    branches:
+      - main
+
+# Забороняємо одночасне виконання кількох деплоїв (захист від race condition)
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy cf-sync-pipeline
+        run: |
+          echo ">>> Розгортання проєкту cf-sync-pipeline..."
+          
+          # Директорія, де розгорнутий проєкт на VPS
+          TARGET_DIR="/home/vbrianka/cf-sync-pipeline"
+          
+          if [ -d "$TARGET_DIR" ]; then
+            cd "$TARGET_DIR"
+            
+            # Підтягуємо оновлення через SSH Deploy Key
+            git pull origin main
+            
+            # Перезбираємо та піднімаємо оновлені сервіси
+            docker compose up -d --build
+            
+            # Очищуємо старі невикористовувані Docker-образи, щоб не забивати диск
+            docker image prune -f
+          else
+            echo "Помилка: директорія $TARGET_DIR не знайдена."
+            exit 1
+          fi
+
+      # Тут можна додати деплой для інших ваших проєктів, які зберігатимуться в репозиторії:
+      # - name: Deploy Another Project
+      #   run: |
+      #     cd /home/vbrianka/another-project
+      #     docker compose up -d --build
