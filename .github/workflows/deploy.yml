@@ -3,9 +3,8 @@ name: Deploy Docker Containers to Office VPS
 on:
   push:
     branches:
-      - main
+      - production  # Деплой тригериться ТІЛЬКИ при мерджі/пуші в production
 
-# Забороняємо одночасне виконання кількох деплоїв (захист від race condition)
 concurrency:
   group: production-deploy
   cancel-in-progress: false
@@ -15,27 +14,26 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Deploy cf-sync-pipeline
         run: |
-          echo ">>> Розгортання проєкту cf-sync-pipeline..."
-          
-          # Директорія, де розгорнутий проєкт на VPS
+          echo ">>> Оновлення продакшену на VPS..."
           TARGET_DIR="/home/vbrianka/cf-sync-pipeline"
           
           if [ -d "$TARGET_DIR" ]; then
             cd "$TARGET_DIR"
             
-            # Підтягуємо оновлення через SSH Deploy Key
-            git pull origin main
+            # Перемикаємося на гілку production та затягуємо свіжий мердж
+            git fetch origin production
+            git checkout -f production
+            git pull origin production
             
-            # Перезбираємо та піднімаємо оновлені сервіси
+            # Перезбираємо та перезапускаємо оновлені контейнери
             docker compose up -d --build
             
-            # Очищуємо старі невикористовувані Docker-образи, щоб не забивати диск
+            # Очищуємо старі невикористовувані образи
             docker image prune -f
+            
+            echo ">>> Деплой успішно завершено!"
           else
             echo "Помилка: директорія $TARGET_DIR не знайдена."
             exit 1
