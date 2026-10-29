@@ -2,7 +2,7 @@ import os
 import io
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from typing import List, Optional
 from enum import IntEnum
 
@@ -89,7 +89,7 @@ def calculate_batches_by_location(farm_num: int, location_id: int, include_babyr
 
     location_display_name = loc_row["locationnumber"] or loc_row["name"]
 
-    # Обчислюємо babyroom тільки якщо це Ферма №1 та користувач увімкнув прапорець
+    # Обчислюємо babyroom тільки якщо це Ферма №1 та увімкнено прапорець
     br_loc_id = None
     should_calc_br = farm_info["has_br"] and include_babyroom
 
@@ -107,6 +107,9 @@ def calculate_batches_by_location(farm_num: int, location_id: int, include_babyr
             if br_row:
                 br_loc_id = br_row["id"]
 
+    # Фільтрація за останні 12 місяців (365 днів від поточної дати)
+    cutoff_date = date.today() - timedelta(days=365)
+
     query_farrowings = """
         SELECT 
             f.id,
@@ -119,9 +122,10 @@ def calculate_batches_by_location(farm_num: int, location_id: int, include_babyr
           AND (c.farrow_location_id = %s OR f.cycle_id IN (
               SELECT id FROM cycle WHERE farrow_location_id = %s AND farm_id = %s
           ))
+          AND f.farrowing_date::date >= %s
         ORDER BY f.farrowing_date ASC;
     """
-    cur.execute(query_farrowings, (db_farm_id, location_id, location_id, db_farm_id))
+    cur.execute(query_farrowings, (db_farm_id, location_id, location_id, db_farm_id, cutoff_date))
     farrowings = cur.fetchall()
 
     if not farrowings:
@@ -144,14 +148,27 @@ def calculate_batches_by_location(farm_num: int, location_id: int, include_babyr
         batches.append(current_batch)
 
     results = []
-    for batch in batches:
+    total_batches = len(batches)
+
+    for idx, batch in enumerate(batches):
         start_d = batch[0]["f_date"]
-        end_d = batch[-1]["f_date"]
+        is_last_batch = (idx + 1 == total_batches)
+
+        # Кінцева дата: день перед стартом наступної партії або поточний день для останньої
+        if not is_last_batch:
+            next_start_d = batches[idx + 1][0]["f_date"]
+            end_d = next_start_d - timedelta(days=1)
+        else:
+            last_farrow_d = batch[-1]["f_date"]
+            today = date.today()
+            end_d = today if today >= last_farrow_d else last_farrow_d
+
         days = (end_d - start_d).days + 1
         liveborn_sum = sum(item["liveborn"] for item in batch)
         sows_count = len(batch)
         per_sow = liveborn_sum / sows_count if sows_count > 0 else 0.0
 
+        # Падіж у відділенні
         cur.execute("""
             SELECT COALESCE(SUM(amount), COUNT(id)) as deaths
             FROM death
@@ -163,6 +180,7 @@ def calculate_batches_by_location(farm_num: int, location_id: int, include_babyr
         deaths = death_row["deaths"] or 0
         death_pct = (deaths / liveborn_sum * 100) if liveborn_sum > 0 else 0.0
 
+        # Падіж у Babyroom
         br_deaths = None
         br_pct = None
         if should_calc_br and br_loc_id:
@@ -192,7 +210,8 @@ def calculate_batches_by_location(farm_num: int, location_id: int, include_babyr
             "br": br_deaths if should_calc_br else None,
             "br_pct": round(br_pct, 2) if (should_calc_br and br_pct is not None) else None,
             "all_deaths": all_deaths if should_calc_br else deaths,
-            "all_death_pct": round(all_death_pct, 2) if should_calc_br else round(death_pct, 2)
+            "all_death_pct": round(all_death_pct, 2) if should_calc_br else round(death_pct, 2),
+            "is_current": is_last_batch
         })
 
     cur.close()
@@ -215,9 +234,10 @@ def get_cyrillic_font(size: int = 15):
     return ImageFont.load_default()
 
 def render_table_image(data: list, show_babyroom: bool) -> io.BytesIO:
-    headers = ["З", "До", "Днів", "Поросят", "СМ", "На СМ", "Падіж", "% П"]
+    # Оновлені структуровані назви колонок
+    headers = ["Початок", "Кінець", "Днів", "Живонародж.", "Свиноматок", "Порос./СМ", "Падіж", "% Падежу"]
     if show_babyroom:
-        headers.extend(["BR", "%BR", "ALL", "%ALL"])
+        headers.extend(["Падіж BR", "% BR", "Заг. падіж", "Заг. %"])
 
     rows = []
     for r in data:
@@ -229,27 +249,28 @@ def render_table_image(data: list, show_babyroom: bool) -> io.BytesIO:
             str(r["sows"]),
             f"{r['per_sow']:.2f}",
             str(r["deaths"]),
-            f"{r['death_pct']:.2f}"
+            f"{r['death_pct']:.2f}%"
         ]
         if show_babyroom:
             row.extend([
                 str(r["br"]) if r["br"] is not None else "-",
-                f"{r['br_pct']:.2f}" if r["br_pct"] is not None else "-",
+                f"{r['br_pct']:.2f}%" if r["br_pct"] is not None else "-",
                 str(r["all_deaths"]),
-                f"{r['all_death_pct']:.2f}"
+                f"{r['all_death_pct']:.2f}%"
             ])
         rows.append(row)
 
-    font = get_cyrillic_font(15)
+    font = get_cyrillic_font(14)
+    font_header = get_cyrillic_font(14)
     row_height = 42
-    padding_x = 18
+    padding_x = 16
 
     dummy_img = Image.new("RGB", (1, 1))
     dummy_draw = ImageDraw.Draw(dummy_img)
 
     col_widths = []
     for i, h in enumerate(headers):
-        bbox_h = dummy_draw.textbbox((0, 0), h, font=font)
+        bbox_h = dummy_draw.textbbox((0, 0), h, font=font_header)
         max_w = bbox_h[2] - bbox_h[0]
         for r in rows:
             bbox_v = dummy_draw.textbbox((0, 0), r[i], font=font)
@@ -265,27 +286,43 @@ def render_table_image(data: list, show_babyroom: bool) -> io.BytesIO:
     start_x = 25
     start_y = 20
 
+    # Шапка таблиці (темно-синій/сірий професійний фон)
     curr_x = start_x
     for i, header in enumerate(headers):
         w = col_widths[i]
-        draw.rectangle([curr_x, start_y, curr_x + w, start_y + row_height], fill=(240, 243, 246), outline=(60, 60, 60), width=1)
-        bbox = draw.textbbox((0, 0), header, font=font)
+        draw.rectangle([curr_x, start_y, curr_x + w, start_y + row_height], fill=(235, 240, 246), outline=(180, 190, 200), width=1)
+        bbox = draw.textbbox((0, 0), header, font=font_header)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
-        draw.text((curr_x + (w - tw) / 2, start_y + (row_height - th) / 2 - 2), header, fill=(0, 0, 0), font=font)
+        draw.text((curr_x + (w - tw) / 2, start_y + (row_height - th) / 2 - 1), header, fill=(30, 41, 59), font=font_header)
         curr_x += w
 
+    # Тіло таблиці
     curr_y = start_y + row_height
     for row_idx, row in enumerate(rows):
         curr_x = start_x
-        row_bg = (255, 255, 255) if row_idx % 2 == 0 else (249, 250, 251)
+        is_current_batch = data[row_idx].get("is_current", False)
+
+        # Вибір кольору фону:
+        # 1. Якщо це останній активний/поточний опорос — світло-блакитний відтінок
+        # 2. Якщо звичайний рядок — зебра (білий / світлий димчасто-сірий)
+        if is_current_batch:
+            row_bg = (224, 242, 254)  # Світло-блакитний (Tailwind Sky-100)
+            text_color = (3, 105, 161) # Насичений темно-блакитний для гармонійності
+        elif row_idx % 2 == 0:
+            row_bg = (255, 255, 255)
+            text_color = (15, 23, 42)
+        else:
+            row_bg = (248, 250, 252)
+            text_color = (15, 23, 42)
+
         for i, val in enumerate(row):
             w = col_widths[i]
-            draw.rectangle([curr_x, curr_y, curr_x + w, curr_y + row_height], fill=row_bg, outline=(60, 60, 60), width=1)
+            draw.rectangle([curr_x, curr_y, curr_x + w, curr_y + row_height], fill=row_bg, outline=(203, 213, 225), width=1)
             bbox = draw.textbbox((0, 0), val, font=font)
             tw = bbox[2] - bbox[0]
             th = bbox[3] - bbox[1]
-            draw.text((curr_x + (w - tw) / 2, curr_y + (row_height - th) / 2 - 2), val, fill=(15, 23, 42), font=font)
+            draw.text((curr_x + (w - tw) / 2, curr_y + (row_height - th) / 2 - 1), val, fill=text_color, font=font)
             curr_x += w
         curr_y += row_height
 
