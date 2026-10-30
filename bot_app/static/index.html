@@ -10,16 +10,60 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
+    :root {
+      color-scheme: light;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+      background: #f1f5f9;
+    }
+
+    body {
+      color: #0f172a;
+    }
+
     .sticky-col {
       position: sticky;
       left: 0;
       z-index: 10;
-      background-color: var(--tg-theme-secondary-bg-color, #ffffff);
+      background: #ffffff;
+    }
+
+    .report-table thead .sticky-col {
+      background: #1e293b;
+      color: #ffffff;
+    }
+
+    .report-table th,
+    .report-table td {
+      white-space: nowrap;
     }
   </style>
 </head>
-<body class="bg-[var(--tg-theme-bg-color,#f8fafc)] text-[var(--tg-theme-text-color,#0f172a)] font-sans antialiased p-3">
-  <div id="root"></div>
+<body class="bg-slate-100 text-slate-900 font-sans antialiased p-3">
+  <div id="root">
+    <div id="app-status" style="max-width: 720px; margin: 20px auto; padding: 20px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; color: #334155; font: 14px Arial, sans-serif;">
+      Завантаження Mini App...
+    </div>
+  </div>
+
+  <script>
+    window.setTimeout(() => {
+      const root = document.getElementById("root");
+      const status = document.getElementById("app-status");
+      if (status && root && root.children.length === 1) {
+        status.innerHTML = "Mini App не завантажилася. Закрийте це вікно та відкрийте нову кнопку в чаті з ботом.";
+      }
+    }, 10000);
+    window.addEventListener("error", (event) => {
+      const status = document.getElementById("app-status");
+      if (status && event.message) {
+        status.textContent = `Помилка завантаження Mini App: ${event.message}`;
+      }
+    });
+  </script>
 
   <script type="text/babel">
     const { useState, useEffect } = React;
@@ -27,6 +71,14 @@
 
     if (tg) {
       tg.expand();
+    }
+
+    async function fetchJson(url, signal) {
+      const response = await fetch(url, { signal });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return response.json();
     }
 
     const FARMS = [
@@ -40,50 +92,73 @@
       const [departments, setDepartments] = useState([]);
       const [selectedDept, setSelectedDept] = useState(null);
       const [includeBabyroom, setIncludeBabyroom] = useState(true);
+      const [includeSows, setIncludeSows] = useState(true);
       const [reportData, setReportData] = useState([]);
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
 
       // Завантаження списку відділень при зміні ферми
       useEffect(() => {
+        const controller = new AbortController();
         setLoading(true);
         setSelectedDept(null);
         setReportData([]);
         setError(null);
 
-        fetch(`/api/departments?farm_id=${farmId}`)
-          .then(res => res.json())
+        fetchJson(`/api/departments?farm_id=${farmId}`, controller.signal)
           .then(data => {
             setDepartments(data);
             if (data.length > 0) {
               setSelectedDept(data[0].id);
             }
           })
-          .catch(err => setError("Помилка завантаження відділень"))
-          .finally(() => setLoading(false));
+          .catch(err => {
+            if (err.name !== "AbortError") {
+              setError("Помилка завантаження відділень");
+            }
+          })
+          .finally(() => {
+            if (!controller.signal.aborted) {
+              setLoading(false);
+            }
+          });
+
+        return () => controller.abort();
       }, [farmId]);
 
-      // Завантаження звіту при зміні відділення або чекбоксу babyroom
+      // Завантаження звіту при зміні відділення або параметрів розрахунку
       useEffect(() => {
         if (!selectedDept) return;
+        const controller = new AbortController();
         setLoading(true);
         setError(null);
 
-        const url = `/api/report?farm_id=${farmId}&location_id=${selectedDept}&include_babyroom=${includeBabyroom}`;
-        fetch(url)
-          .then(res => res.json())
+        const url = `/api/report?farm_id=${farmId}&location_id=${selectedDept}&include_babyroom=${includeBabyroom}&include_sows=${includeSows}`;
+        fetchJson(url, controller.signal)
           .then(data => setReportData(data))
-          .catch(err => setError("Помилка завантаження звіту"))
-          .finally(() => setLoading(false));
-      }, [selectedDept, farmId, includeBabyroom]);
+          .catch(err => {
+            if (err.name !== "AbortError") {
+              setError("Помилка завантаження звіту");
+            }
+          })
+          .finally(() => {
+            if (!controller.signal.aborted) {
+              setLoading(false);
+            }
+          });
+
+        return () => controller.abort();
+      }, [selectedDept, farmId, includeBabyroom, includeSows]);
 
       const isFarm1 = farmId === 1;
       const showBabyroomCols = isFarm1 && includeBabyroom;
+      const showSowCols = includeSows;
+      const showTotalCols = showSowCols || showBabyroomCols;
 
       return (
-        <div class="max-w-4xl mx-auto space-y-4">
+        <div class="max-w-6xl mx-auto space-y-4">
           {/* Вибір ферми */}
-          <div class="bg-white dark:bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-200 dark:border-slate-700">
+          <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
             <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Ферма</label>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {FARMS.map(f => (
@@ -93,7 +168,7 @@
                   class={`px-3 py-2 text-xs font-medium rounded-lg text-left transition-all ${
                     farmId === f.id
                       ? "bg-blue-600 text-white shadow-sm"
-                      : "bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200"
+                      : "bg-slate-100 hover:bg-slate-200 text-slate-800"
                   }`}
                 >
                   {f.name}
@@ -104,7 +179,7 @@
 
           {/* Вибір відділення та опція babyroom */}
           {departments.length > 0 && (
-            <div class="bg-white dark:bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3">
+            <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-3">
               <div>
                 <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Відділення опоросу</label>
                 <div class="flex flex-wrap gap-2">
@@ -114,8 +189,8 @@
                       onClick={() => setSelectedDept(d.id)}
                       class={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all ${
                         selectedDept === d.id
-                          ? "bg-slate-900 text-white border-slate-900 dark:bg-blue-600 dark:border-blue-600"
-                          : "border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300"
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "border-slate-300 text-slate-700 hover:bg-slate-100"
                       }`}
                     >
                       {d.locationnumber || d.name}
@@ -126,8 +201,8 @@
 
               {/* Опціональна галочка babyroom (тільки для 1 ферми) */}
               {isFarm1 && (
-                <div class="pt-2 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                  <label htmlFor="br-checkbox" class="text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-2">
+                <div class="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <label htmlFor="br-checkbox" class="text-xs font-medium text-slate-700 cursor-pointer flex items-center gap-2">
                     <input
                       id="br-checkbox"
                       type="checkbox"
@@ -139,6 +214,18 @@
                   </label>
                 </div>
               )}
+              <div class="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <label htmlFor="sows-checkbox" class="text-xs font-medium text-slate-700 cursor-pointer flex items-center gap-2">
+                  <input
+                    id="sows-checkbox"
+                    type="checkbox"
+                    checked={includeSows}
+                    onChange={(e) => setIncludeSows(e.target.checked)}
+                    class="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                  />
+                  <span>Враховувати падіж <strong>свиноматок</strong> (падіж СМ та загальний підсумок)</span>
+                </label>
+              </div>
             </div>
           )}
 
@@ -153,48 +240,72 @@
 
           {/* Таблиця звітів */}
           {!loading && reportData.length > 0 && (
-            <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div class="overflow-x-auto">
-                <table class="w-full text-xs text-center border-collapse">
+                <table class="report-table w-full text-xs text-center border-collapse text-slate-700">
                   <thead>
-                    <tr class="bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
-                      <th class="p-2.5 font-bold sticky-col border-r border-slate-200 dark:border-slate-700">З</th>
-                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">До</th>
-                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">Днів</th>
-                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">Поросят</th>
-                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">СМ</th>
-                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">На СМ</th>
-                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">Падіж</th>
-                      <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">% П</th>
+                    <tr class="bg-slate-800 border-b border-slate-700 text-white">
+                      <th class="p-2.5 font-bold sticky-col border-r border-slate-200">З</th>
+                      <th class="p-2.5 font-bold border-r border-slate-700">До</th>
+                      <th class="p-2.5 font-bold border-r border-slate-700">Днів</th>
+                      <th class="p-2.5 font-bold border-r border-slate-700">Поросят</th>
+                      <th class="p-2.5 font-bold border-r border-slate-700">СМ</th>
+                      <th class="p-2.5 font-bold border-r border-slate-700">На СМ</th>
+                      <th class="p-2.5 font-bold border-r border-slate-700">Падіж пор.</th>
+                      <th class="p-2.5 font-bold border-r border-slate-700">% П</th>
+                      {showSowCols && (
+                        <>
+                          <th class="p-2.5 font-bold border-r border-slate-700">Падіж СМ</th>
+                          <th class="p-2.5 font-bold border-r border-slate-700">% СМ</th>
+                        </>
+                      )}
                       {showBabyroomCols && (
                         <>
-                          <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">BR</th>
-                          <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">%BR</th>
-                          <th class="p-2.5 font-bold border-r border-slate-200 dark:border-slate-700">ALL</th>
-                          <th class="p-2.5 font-bold">%ALL</th>
+                          <th class="p-2.5 font-bold border-r border-slate-700">BR</th>
+                          <th class="p-2.5 font-bold border-r border-slate-700">% BR</th>
+                          <th class="p-2.5 font-bold border-r border-slate-700">Падіж пор. заг.</th>
+                          <th class="p-2.5 font-bold border-r border-slate-700">% пор. заг.</th>
+                        </>
+                      )}
+                      {showTotalCols && (
+                        <>
+                          <th class="p-2.5 font-bold border-r border-slate-700">Всього пад.</th>
+                          <th class="p-2.5 font-bold">% Всього</th>
                         </>
                       )}
                     </tr>
                   </thead>
-                  <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
+                  <tbody class="divide-y divide-slate-200">
                     {reportData.map((row, idx) => (
-                      <tr key={idx} class="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                        <td class="p-2.5 font-medium sticky-col border-r border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white">
+                      <tr key={idx} class={`${row.is_current ? "bg-blue-50" : "bg-white"} hover:bg-slate-50 transition-colors`}>
+                        <td class="p-2.5 font-medium sticky-col border-r border-slate-200 text-slate-900">
                           {row.start_date}
                         </td>
-                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.end_date}</td>
-                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.days}</td>
-                        <td class="p-2.5 font-semibold text-blue-600 border-r border-slate-200 dark:border-slate-700">{row.liveborn}</td>
-                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.sows}</td>
-                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.per_sow.toFixed(2)}</td>
-                        <td class="p-2.5 text-red-600 border-r border-slate-200 dark:border-slate-700">{row.deaths}</td>
-                        <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.death_pct.toFixed(2)}%</td>
+                        <td class="p-2.5 border-r border-slate-200">{row.end_date}</td>
+                        <td class="p-2.5 border-r border-slate-200">{row.days}</td>
+                        <td class="p-2.5 font-semibold text-blue-600 border-r border-slate-200">{row.liveborn}</td>
+                        <td class="p-2.5 border-r border-slate-200">{row.sows}</td>
+                        <td class="p-2.5 border-r border-slate-200">{row.per_sow.toFixed(2)}</td>
+                        <td class="p-2.5 text-red-600 border-r border-slate-200">{row.piglet_deaths}</td>
+                        <td class="p-2.5 border-r border-slate-200">{row.piglet_death_pct.toFixed(2)}%</td>
+                        {showSowCols && (
+                          <>
+                            <td class="p-2.5 text-red-600 border-r border-slate-200">{row.sow_deaths}</td>
+                            <td class="p-2.5 border-r border-slate-200">{row.sow_death_pct.toFixed(2)}%</td>
+                          </>
+                        )}
                         {showBabyroomCols && (
                           <>
-                            <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.br !== null ? row.br : "-"}</td>
-                            <td class="p-2.5 border-r border-slate-200 dark:border-slate-700">{row.br_pct !== null ? `${row.br_pct.toFixed(2)}%` : "-"}</td>
-                            <td class="p-2.5 font-semibold text-rose-600 border-r border-slate-200 dark:border-slate-700">{row.all_deaths}</td>
-                            <td class="p-2.5 font-semibold">{row.all_death_pct.toFixed(2)}%</td>
+                            <td class="p-2.5 border-r border-slate-200">{row.br !== null ? row.br : "-"}</td>
+                            <td class="p-2.5 border-r border-slate-200">{row.br_pct !== null ? `${row.br_pct.toFixed(2)}%` : "-"}</td>
+                            <td class="p-2.5 font-semibold text-rose-600 border-r border-slate-200">{row.all_piglet_deaths}</td>
+                            <td class="p-2.5 font-semibold border-r border-slate-200">{row.all_piglet_death_pct.toFixed(2)}%</td>
+                          </>
+                        )}
+                        {showTotalCols && (
+                          <>
+                            <td class="p-2.5 font-semibold text-rose-600 border-r border-slate-200">{row.total_all_deaths}</td>
+                            <td class="p-2.5 font-semibold">{row.total_all_pct.toFixed(2)}%</td>
                           </>
                         )}
                       </tr>
@@ -206,7 +317,7 @@
           )}
 
           {!loading && reportData.length === 0 && selectedDept && (
-            <div class="bg-white dark:bg-slate-800 rounded-xl p-8 text-center text-slate-500 text-sm border border-slate-200 dark:border-slate-700">
+            <div class="bg-white rounded-xl p-8 text-center text-slate-500 text-sm border border-slate-200">
               Даних по опоросах для обраного відділення не знайдено.
             </div>
           )}
