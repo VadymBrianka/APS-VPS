@@ -15,10 +15,13 @@ from fastapi.responses import FileResponse
 import uvicorn
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import CommandStart, Command
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.filters import CommandStart, Command, BaseFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import BufferedInputFile, BotCommand, BotCommandScopeDefault
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -45,6 +48,9 @@ class FarmEnum(IntEnum):
     f1 = 1
     f7 = 7
     f14 = 14
+
+class BroadcastStates(StatesGroup):
+    waiting_for_message = State()
 
 def get_db():
     return psycopg2.connect(
@@ -159,6 +165,123 @@ def save_or_update_user(
     finally:
         conn.close()
 
+# --- Робота з БД для адмін-панелі ---
+def is_user_admin(telegram_id: int) -> bool:
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT role FROM bot_user WHERE telegram_id = %s;", (telegram_id,))
+            row = cur.fetchone()
+            return bool(row and row.get("role") == "admin")
+    finally:
+        conn.close()
+
+def get_admin_metrics() -> dict:
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    COUNT(*) AS total_users,
+                    COUNT(*) FILTER (WHERE role = 'admin') AS admins_count,
+                    COUNT(*) FILTER (WHERE is_active IS TRUE AND is_bot_blocked IS FALSE) AS active_recipients,
+                    COUNT(*) FILTER (WHERE last_seen_at >= NOW() - INTERVAL '24 HOURS') AS active_today,
+                    COALESCE(SUM(reports_generated_count), 0) AS total_reports,
+                    COALESCE(SUM(interactions_count), 0) AS total_interactions
+                FROM bot_user;
+            """)
+            return dict(cur.fetchone() or {})
+    finally:
+        conn.close()
+
+def get_recent_users(limit: int = 10, offset: int = 0) -> list[dict]:
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    telegram_id, username, first_name, last_name,
+                    role, is_active, is_bot_blocked, reports_generated_count, last_seen_at
+                FROM bot_user
+                ORDER BY last_seen_at DESC
+                LIMIT %s OFFSET %s;
+            """, (limit, offset))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+def get_user_by_id(telegram_id: int) -> Optional[dict]:
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM bot_user WHERE telegram_id = %s;", (telegram_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+    finally:
+        conn.close()
+
+def update_user_role(telegram_id: int, new_role: str):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE bot_user 
+                SET role = %s, updated_at = NOW() 
+                WHERE telegram_id = %s;
+            """, (new_role, telegram_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def mark_bot_blocked(telegram_id: int):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE bot_user 
+                SET is_bot_blocked = TRUE, updated_at = NOW() 
+                WHERE telegram_id = %s;
+            """, (telegram_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        conn.close()
+
+def get_broadcast_recipients(farm_id: Optional[int] = None) -> list[int]:
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            if farm_id is not None:
+                cur.execute("""
+                    SELECT telegram_id 
+                    FROM bot_user 
+                    WHERE is_active IS TRUE 
+                      AND is_bot_blocked IS FALSE 
+                      AND assigned_farm_id = %s;
+                """, (farm_id,))
+            else:
+                cur.execute("""
+                    SELECT telegram_id 
+                    FROM bot_user 
+                    WHERE is_active IS TRUE 
+                      AND is_bot_blocked IS FALSE;
+                """)
+            return [row["telegram_id"] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+class AdminOnlyFilter(BaseFilter):
+    async def __call__(self, event: types.TelegramObject) -> bool:
+        user = getattr(event, "from_user", None)
+        if not user:
+            return False
+        return await asyncio.to_thread(is_user_admin, user.id)
+
+# --- Логіка розрахунків ферм ---
 def get_farrowing_locations(farm_num: int):
     farm_info = FARMS.get(farm_num)
     if not farm_info:
@@ -349,9 +472,6 @@ def calculate_batches_by_location(
         all_piglet_death_pct = (all_piglet_deaths / liveborn_sum * 100) if liveborn_sum > 0 else 0.0
 
         total_all_deaths = all_piglet_deaths + (sow_deaths if include_sows else 0)
-        # % Всього рахується від живонароджених поросят. Прапорець
-        # свиноматок додає їхній фактичний падіж, але не повинен змінювати
-        # відсоток, якщо падежу свиноматок немає.
         total_all_pct = (total_all_deaths / liveborn_sum * 100) if liveborn_sum > 0 else 0.0
 
         results.append({
@@ -517,17 +637,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Забезпечуємо роботу всередині Telegram WebApp IFrame (дозволяємо вбудовування)
 @app.middleware("http")
 async def add_telegram_iframe_headers(request: Request, call_next):
     response: Response = await call_next(request)
-    # Видаляємо обмеження X-Frame-Options для iframe Telegram
     if "x-frame-options" in response.headers:
         del response.headers["x-frame-options"]
     response.headers["Content-Security-Policy"] = "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org https://*.t.me;"
     return response
 
-# Монтуємо папку зі статикою (перевіряємо шлях)
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -562,32 +679,40 @@ def api_report(
     )
     return data
 
-# --- Telegram Bot ---
+# --- Telegram Bot & FSM ---
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 
 async def setup_bot_commands():
     commands = [
         BotCommand(command="start", description="Головне меню / Вибір ферми"),
-        BotCommand(command="report", description="Сформувати новий звіт")
+        BotCommand(command="report", description="Сформувати новий звіт"),
+        BotCommand(command="admin", description="Панель адміністратора")
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
 
 async def setup_database():
     await asyncio.to_thread(ensure_bot_user_table)
 
-def build_farms_keyboard():
+def build_farms_keyboard(is_admin: bool = False):
     builder = InlineKeyboardBuilder()
     for f_num, f_data in FARMS.items():
         builder.button(text=f_data["name"], callback_data=f"farm_{f_num}")
     builder.adjust(1)
     
-    # Кнопка Mini App показується лише за наявності валідного HTTPS URL
     if WEBAPP_URL and WEBAPP_URL.startswith("https://"):
         builder.row(types.InlineKeyboardButton(
             text="📱 Відкрити Web Mini App",
             web_app=types.WebAppInfo(url=WEBAPP_URL)
         ))
+        
+    if is_admin:
+        builder.row(types.InlineKeyboardButton(
+            text="🔐 Панель адміністратора",
+            callback_data="admin_home"
+        ))
+        
     return builder.as_markup()
 
 def build_dept_keyboard(farm_num: int, locations: list):
@@ -599,9 +724,66 @@ def build_dept_keyboard(farm_num: int, locations: list):
     builder.row(types.InlineKeyboardButton(text="⬅️ До вибору ферми", callback_data="back_farms"))
     return builder.as_markup()
 
+def build_admin_main_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👥 Список користувачів", callback_data="admin_users_0")
+    builder.button(text="📢 Створити розсилку", callback_data="admin_bc_audience")
+    builder.button(text="🔄 Оновити дані", callback_data="admin_refresh")
+    builder.button(text="⬅️ До вибору ферми", callback_data="back_farms")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def build_users_list_keyboard(users: list[dict], offset: int = 0, limit: int = 10):
+    builder = InlineKeyboardBuilder()
+    for u in users:
+        role_mark = "👑" if u["role"] == "admin" else "👤"
+        uname = f"@{u['username']}" if u.get("username") else str(u["telegram_id"])
+        btn_title = f"{role_mark} {u.get('first_name', '')} ({uname})"
+        builder.button(text=btn_title, callback_data=f"admin_view_{u['telegram_id']}_{offset}")
+
+    builder.adjust(1)
+
+    nav_buttons = []
+    if offset >= limit:
+        nav_buttons.append(types.InlineKeyboardButton(text="⬅️ Попередня", callback_data=f"admin_users_{offset - limit}"))
+    if len(users) == limit:
+        nav_buttons.append(types.InlineKeyboardButton(text="Наступна ➡️", callback_data=f"admin_users_{offset + limit}"))
+
+    if nav_buttons:
+        builder.row(*nav_buttons)
+    builder.row(types.InlineKeyboardButton(text="⬅️ До адмін-панелі", callback_data="admin_home"))
+    return builder.as_markup()
+
+def build_user_card_keyboard(target_id: int, current_role: str, offset: int):
+    builder = InlineKeyboardBuilder()
+    if current_role == "admin":
+        builder.button(text="🔻 Понизити до Viewer", callback_data=f"admin_setrole_{target_id}_viewer_{offset}")
+    else:
+        builder.button(text="👑 Призначити Admin", callback_data=f"admin_setrole_{target_id}_admin_{offset}")
+    builder.button(text="⬅️ Назад до списку", callback_data=f"admin_users_{offset}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def build_audience_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🌐 Всім користувачам", callback_data="admin_bc_target_all")
+    for f_num, f_data in FARMS.items():
+        builder.button(text=f"🏢 Тільки {f_data['name']}", callback_data=f"admin_bc_target_{f_num}")
+    builder.button(text="❌ Скасувати", callback_data="admin_home")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def build_broadcast_confirm_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🚀 Підтвердити та відправити", callback_data="admin_bc_confirm")
+    builder.button(text="❌ Скасувати", callback_data="admin_bc_cancel")
+    builder.adjust(1)
+    return builder.as_markup()
+
 @dp.message(CommandStart())
 @dp.message(Command("report"))
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
     start_payload = None
     if message.text:
         parts = message.text.split(maxsplit=1)
@@ -613,12 +795,259 @@ async def cmd_start(message: types.Message):
         "start" if message.text and message.text.startswith("/start") else "report",
         start_payload,
     )
+    is_admin = await asyncio.to_thread(is_user_admin, message.from_user.id)
     await message.answer(
         "👋 **Аналітика опоросів та падежів**\n\nОберіть потрібну ферму для формування звіту:",
-        reply_markup=build_farms_keyboard(),
+        reply_markup=build_farms_keyboard(is_admin=is_admin),
         parse_mode="Markdown"
     )
 
+# --- Хендлери адмін-панелі ---
+@dp.message(Command("admin"), AdminOnlyFilter())
+async def cmd_admin(message: types.Message, state: FSMContext):
+    await state.clear()
+    await asyncio.to_thread(save_or_update_user, message.from_user, "admin_panel")
+    metrics = await asyncio.to_thread(get_admin_metrics)
+    text = (
+        "🔐 **Панель адміністратора**\n\n"
+        f"👥 **Всього користувачів:** `{metrics.get('total_users', 0)}`\n"
+        f"👑 **Адміністраторів:** `{metrics.get('admins_count', 0)}`\n"
+        f"📬 **Активних одержувачів:** `{metrics.get('active_recipients', 0)}`\n"
+        f"🟢 **Активні за 24г:** `{metrics.get('active_today', 0)}`\n"
+        f"📊 **Згенеровано звітів:** `{metrics.get('total_reports', 0)}`\n"
+        f"💬 **Всього дій:** `{metrics.get('total_interactions', 0)}`"
+    )
+    await message.answer(text, reply_markup=build_admin_main_keyboard(), parse_mode="Markdown")
+
+@dp.message(Command("admin"))
+async def cmd_admin_denied(message: types.Message):
+    await message.answer("⛔️ У вас немає доступу до панелі адміністратора.")
+
+@dp.callback_query(F.data.in_(["admin_home", "admin_refresh"]), AdminOnlyFilter())
+async def cb_admin_home(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await asyncio.to_thread(save_or_update_user, callback.from_user, "admin_panel")
+    metrics = await asyncio.to_thread(get_admin_metrics)
+    text = (
+        "🔐 **Панель адміністратора**\n\n"
+        f"👥 **Всього користувачів:** `{metrics.get('total_users', 0)}`\n"
+        f"👑 **Адміністраторів:** `{metrics.get('admins_count', 0)}`\n"
+        f"📬 **Активних одержувачів:** `{metrics.get('active_recipients', 0)}`\n"
+        f"🟢 **Активні за 24г:** `{metrics.get('active_today', 0)}`\n"
+        f"📊 **Згенеровано звітів:** `{metrics.get('total_reports', 0)}`\n"
+        f"💬 **Всього дій:** `{metrics.get('total_interactions', 0)}`"
+    )
+    if callback.message.photo:
+        await callback.message.answer(text, reply_markup=build_admin_main_keyboard(), parse_mode="Markdown")
+        await callback.message.delete()
+    else:
+        await callback.message.edit_text(text, reply_markup=build_admin_main_keyboard(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_users_"), AdminOnlyFilter())
+async def cb_admin_users(callback: types.CallbackQuery):
+    offset = int(callback.data.split("_")[2])
+    limit = 10
+    users = await asyncio.to_thread(get_recent_users, limit, offset)
+
+    if not users:
+        await callback.answer("Користувачів більше немає.", show_alert=True)
+        return
+
+    text = f"👥 **Список користувачів** (показано {offset + 1}–{offset + len(users)}):"
+    await callback.message.edit_text(text, reply_markup=build_users_list_keyboard(users, offset, limit), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_view_"), AdminOnlyFilter())
+async def cb_admin_user_card(callback: types.CallbackQuery):
+    _, _, target_id_str, offset_str = callback.data.split("_")
+    target_id = int(target_id_str)
+    offset = int(offset_str)
+
+    user = await asyncio.to_thread(get_user_by_id, target_id)
+    if not user:
+        await callback.answer("Користувача не знайдено.", show_alert=True)
+        return
+
+    last_seen = user["last_seen_at"].strftime("%d.%m.%Y %H:%M") if user.get("last_seen_at") else "-"
+    blocked_status = "⚠️ Заблокував бота" if user.get("is_bot_blocked") else "✅ Активний"
+    text = (
+        f"👤 **Профіль користувача:**\n\n"
+        f"• **Telegram ID:** `{user['telegram_id']}`\n"
+        f"• **Нікнейм:** @{user['username'] or '-'}\n"
+        f"• **Ім'я:** {user['first_name']} {user.get('last_name') or ''}\n"
+        f"• **Роль:** `{user['role']}`\n"
+        f"• **Статус:** {blocked_status}\n"
+        f"• **Остання дія:** `{user['last_action'] or '-'}`\n"
+        f"• **Остання активність:** {last_seen}\n"
+        f"• **Згенеровано звітів:** `{user['reports_generated_count']}`\n"
+        f"• **Всього взаємодій:** `{user['interactions_count']}`"
+    )
+    await callback.message.edit_text(text, reply_markup=build_user_card_keyboard(target_id, user["role"], offset), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_setrole_"), AdminOnlyFilter())
+async def cb_admin_set_role(callback: types.CallbackQuery):
+    _, _, target_id_str, new_role, offset_str = callback.data.split("_")
+    target_id = int(target_id_str)
+    offset = int(offset_str)
+
+    if target_id == callback.from_user.id and new_role != "admin":
+        await callback.answer("⚠️ Ви не можете понизити власну роль!", show_alert=True)
+        return
+
+    await asyncio.to_thread(update_user_role, target_id, new_role)
+    await callback.answer(f"Роль змінено на {new_role}!", show_alert=True)
+
+    user = await asyncio.to_thread(get_user_by_id, target_id)
+    last_seen = user["last_seen_at"].strftime("%d.%m.%Y %H:%M") if user.get("last_seen_at") else "-"
+    blocked_status = "⚠️ Заблокував бота" if user.get("is_bot_blocked") else "✅ Активний"
+    text = (
+        f"👤 **Профіль користувача:**\n\n"
+        f"• **Telegram ID:** `{user['telegram_id']}`\n"
+        f"• **Нікнейм:** @{user['username'] or '-'}\n"
+        f"• **Ім'я:** {user['first_name']} {user.get('last_name') or ''}\n"
+        f"• **Роль:** `{user['role']}`\n"
+        f"• **Статус:** {blocked_status}\n"
+        f"• **Остання дія:** `{user['last_action'] or '-'}`\n"
+        f"• **Остання активність:** {last_seen}\n"
+        f"• **Згенеровано звітів:** `{user['reports_generated_count']}`\n"
+        f"• **Всього взаємодій:** `{user['interactions_count']}`"
+    )
+    await callback.message.edit_text(text, reply_markup=build_user_card_keyboard(target_id, user["role"], offset), parse_mode="Markdown")
+
+# --- Секція розсилки повідомлень (Broadcast) ---
+@dp.callback_query(F.data == "admin_bc_audience", AdminOnlyFilter())
+async def cb_admin_bc_audience(callback: types.CallbackQuery):
+    text = "📢 **Створення розсилки**\n\nОберіть аудиторію для відправки повідомлення:"
+    await callback.message.edit_text(text, reply_markup=build_audience_keyboard(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_bc_target_"), AdminOnlyFilter())
+async def cb_admin_bc_target(callback: types.CallbackQuery, state: FSMContext):
+    target_str = callback.data.replace("admin_bc_target_", "")
+    target_farm_id = None if target_str == "all" else int(target_str)
+    
+    recipients = await asyncio.to_thread(get_broadcast_recipients, target_farm_id)
+    count = len(recipients)
+    
+    if count == 0:
+        await callback.answer("⚠️ Для цієї категорії немає активних отримувачів.", show_alert=True)
+        return
+        
+    await state.update_data(target_farm_id=target_farm_id, recipients_count=count)
+    await state.set_state(BroadcastStates.waiting_for_message)
+    
+    target_name = FARMS[target_farm_id]["name"] if target_farm_id else "Всі зареєстровані користувачі"
+    text = (
+        f"📢 **Розсилка для:** {target_name}\n"
+        f"👥 **Одержувачів:** `{count}`\n\n"
+        "✍️ **Надішліть наступним повідомленням те, що хочете розіслати.**\n"
+        "Підтримуються: звичайний текст, форматування Markdown/HTML, фотографії, файли, відео з підписами.\n\n"
+        "_Для скасування надішліть /cancel_"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Скасувати розсилку", callback_data="admin_bc_cancel")
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_bc_cancel", AdminOnlyFilter())
+@dp.message(Command("cancel"), AdminOnlyFilter())
+async def cb_admin_bc_cancel(event: types.TelegramObject, state: FSMContext):
+    await state.clear()
+    text = "❌ Розсилку скасовано. Ви повернулися до адмін-панелі."
+    if isinstance(event, types.CallbackQuery):
+        await event.message.edit_text(text, reply_markup=build_admin_main_keyboard())
+        await event.answer()
+    else:
+        await event.answer(text, reply_markup=build_admin_main_keyboard())
+
+@dp.message(BroadcastStates.waiting_for_message, AdminOnlyFilter())
+async def process_broadcast_content(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    target_farm_id = data.get("target_farm_id")
+    recipients_count = data.get("recipients_count", 0)
+
+    # Зберігаємо ID та чат повідомлення для копіювання
+    await state.update_data(
+        from_chat_id=message.chat.id,
+        message_id=message.message_id
+    )
+
+    await message.answer("👁 **Попередній перегляд вашого оголошення:**")
+    # Показуємо адміністратору точний вигляд повідомлення
+    await message.copy_to(chat_id=message.chat.id)
+
+    target_name = FARMS[target_farm_id]["name"] if target_farm_id else "Всі користувачі"
+    confirm_text = (
+        f"⚠️ **Підтвердження відправки**\n\n"
+        f"• **Аудиторія:** {target_name}\n"
+        f"• **Кількість одержувачів:** `{recipients_count}`\n\n"
+        "Відправити це оголошення всім користувачам?"
+    )
+    await message.answer(confirm_text, reply_markup=build_broadcast_confirm_keyboard(), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "admin_bc_confirm", AdminOnlyFilter())
+async def cb_admin_bc_execute(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    from_chat_id = data.get("from_chat_id")
+    message_id = data.get("message_id")
+    target_farm_id = data.get("target_farm_id")
+
+    if not from_chat_id or not message_id:
+        await callback.answer("⚠️ Помилка: дані повідомлення втрачено. Почніть спочатку.", show_alert=True)
+        await state.clear()
+        return
+
+    recipients = await asyncio.to_thread(get_broadcast_recipients, target_farm_id)
+    total_count = len(recipients)
+
+    await callback.message.edit_text(f"⏳ **Розсилка розпочалася...**\nОдержувачів: `{total_count}`. Зачекайте завершення.")
+    await callback.answer()
+
+    success_count = 0
+    blocked_count = 0
+    error_count = 0
+
+    for user_id in recipients:
+        try:
+            await bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=from_chat_id,
+                message_id=message_id
+            )
+            success_count += 1
+            await asyncio.sleep(0.04)  # ~25 повідомлень на секунду для дотримання лімітів TG
+        except TelegramForbiddenError:
+            # Юзер заблокував бота або видалив акаунт
+            blocked_count += 1
+            await asyncio.to_thread(mark_bot_blocked, user_id)
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            try:
+                await bot.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id
+                )
+                success_count += 1
+            except Exception:
+                error_count += 1
+        except Exception as e:
+            logging.error(f"Помилка надсилання користувачу {user_id}: {e}")
+            error_count += 1
+
+    await state.clear()
+    report_text = (
+        "✅ **Розсилку успішно завершено!**\n\n"
+        f"• **Усього адресатів:** `{total_count}`\n"
+        f"• **Успішно доставлено:** `{success_count}`\n"
+        f"• **Заблокували бота:** `{blocked_count}` (позначено в базі)\n"
+        f"• **Помилок надсилання:** `{error_count}`"
+    )
+    await callback.message.answer(report_text, reply_markup=build_admin_main_keyboard(), parse_mode="Markdown")
+
+# --- Основні Callback-хендлери бота ---
 @dp.callback_query(F.data.startswith("farm_"))
 async def on_farm_chosen(callback: types.CallbackQuery):
     farm_num = int(callback.data.split("_")[1])
@@ -644,13 +1073,17 @@ async def on_farm_chosen(callback: types.CallbackQuery):
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "back_farms")
-async def on_back_farms(callback: types.CallbackQuery):
+async def on_back_farms(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
     await asyncio.to_thread(save_or_update_user, callback.from_user, "back_farms")
+    is_admin = await asyncio.to_thread(is_user_admin, callback.from_user.id)
+    keyboard = build_farms_keyboard(is_admin=is_admin)
+
     if callback.message.photo:
-        await callback.message.answer("Оберіть ферму:", reply_markup=build_farms_keyboard())
+        await callback.message.answer("Оберіть ферму:", reply_markup=keyboard)
         await callback.answer()
     else:
-        await callback.message.edit_text("Оберіть ферму:", reply_markup=build_farms_keyboard())
+        await callback.message.edit_text("Оберіть ферму:", reply_markup=keyboard)
 
 @dp.callback_query(F.data.startswith("loc_"))
 async def on_location_chosen(callback: types.CallbackQuery):
@@ -684,8 +1117,6 @@ async def on_location_chosen(callback: types.CallbackQuery):
         return
 
     show_br = FARMS[farm_num]["has_br"] and include_babyroom
-    # Колонки свиноматок мають залежати від перемикача, а не від фактичної
-    # наявності падежу. Інакше при нульовому падежі перемикання непомітне.
     img_buffer = await asyncio.to_thread(
         render_table_image,
         data,
@@ -742,10 +1173,9 @@ async def on_location_chosen(callback: types.CallbackQuery):
 async def main():
     await setup_database()
     await setup_bot_commands()
-    # Запуск polling у фоні
+    
     polling_task = asyncio.create_task(dp.start_polling(bot))
     
-    # Запуск сервера uvicorn
     config = uvicorn.Config(app=app, host="0.0.0.0", port=8080, log_level="info")
     server = uvicorn.Server(config)
     try:
