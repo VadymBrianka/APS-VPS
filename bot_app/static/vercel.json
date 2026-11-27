@@ -1,7 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "echo Static frontend",
-  "outputDirectory": "bot_app/static",
   "rewrites": [
     {
       "source": "/api/:path*",
