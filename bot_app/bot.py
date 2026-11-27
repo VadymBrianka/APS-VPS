@@ -28,6 +28,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL_UNPOOLED = os.getenv("DATABASE_URL_UNPOOLED")
 DB_HOST = os.getenv("DB_HOST", "postgres_db")
 DB_PORT = int(os.getenv("DB_PORT", 5432))
 DB_NAME = os.getenv("DB_NAME", "cloudfarms_db")
@@ -59,7 +61,10 @@ class FeedbackStates(StatesGroup):
     waiting_for_user_append = State()
     waiting_for_internal_note = State()
 
-def get_db():
+def get_db(use_unpooled: bool = False):
+    dsn = (DATABASE_URL_UNPOOLED or DATABASE_URL) if use_unpooled else (DATABASE_URL or DATABASE_URL_UNPOOLED)
+    if dsn:
+        return psycopg2.connect(dsn, cursor_factory=RealDictCursor)
     return psycopg2.connect(
         host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
         user=DB_USER, password=DB_PASSWORD,
@@ -67,7 +72,7 @@ def get_db():
     )
 
 def ensure_bot_user_table():
-    conn = get_db()
+    conn = get_db(use_unpooled=True)
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -139,8 +144,15 @@ def ensure_bot_user_table():
                 CREATE INDEX IF NOT EXISTS idx_bot_user_username ON bot_user(username);
                 CREATE INDEX IF NOT EXISTS idx_bot_user_last_seen ON bot_user(last_seen_at);
                 CREATE INDEX IF NOT EXISTS idx_bot_user_farm ON bot_user(assigned_farm_id);
-                CREATE INDEX IF NOT EXISTS idx_death_report_lookup ON death(farm_id, location_id, death_date);
-                CREATE INDEX IF NOT EXISTS idx_farrowing_report_lookup ON farrowing(farm_id, farrowing_date);
+                DO $$
+                BEGIN
+                    IF to_regclass('public.death') IS NOT NULL THEN
+                        CREATE INDEX IF NOT EXISTS idx_death_report_lookup ON death(farm_id, location_id, death_date);
+                    END IF;
+                    IF to_regclass('public.farrowing') IS NOT NULL THEN
+                        CREATE INDEX IF NOT EXISTS idx_farrowing_report_lookup ON farrowing(farm_id, farrowing_date);
+                    END IF;
+                END $$;
                 CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
                 CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(telegram_id);
                 CREATE INDEX IF NOT EXISTS idx_feedback_handler ON feedback(handler_admin_id);
@@ -1031,6 +1043,21 @@ async def add_telegram_iframe_headers(request: Request, call_next):
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+@app.get("/health")
+def health_check(response: Response):
+    try:
+        conn = get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS ok;")
+                cur.fetchone()
+        finally:
+            conn.close()
+        return {"status": "ok", "db": "connected"}
+    except Exception as exc:
+        response.status_code = 503
+        return {"status": "error", "db": str(exc)}
 
 @app.get("/")
 def serve_home():
@@ -2283,7 +2310,8 @@ async def main():
     
     polling_task = asyncio.create_task(dp.start_polling(bot))
     
-    config = uvicorn.Config(app=app, host="0.0.0.0", port=8080, log_level="info")
+    port = int(os.getenv("PORT", 8080))
+    config = uvicorn.Config(app=app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)
     try:
         await server.serve()

@@ -15,6 +15,7 @@ logging.basicConfig(
 )
 
 # Читання конфігурації з .env
+DATABASE_URL = os.getenv("DATABASE_URL_UNPOOLED") or os.getenv("DATABASE_URL")
 DB_HOST = os.getenv("DB_HOST", "postgres_db")
 DB_PORT = int(os.getenv("DB_PORT", 5432))
 DB_NAME = os.getenv("DB_NAME", "cloudfarms_db")
@@ -33,6 +34,8 @@ TABLE_SCHEMAS = {}
 
 
 def get_db_connection():
+    if DATABASE_URL:
+        return psycopg2.connect(DATABASE_URL)
     return psycopg2.connect(
         host=DB_HOST,
         port=DB_PORT,

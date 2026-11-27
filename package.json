@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "build": "python -m py_compile sync_service.py bot_app/bot.py"
+  },
+  "dependencies": {
+    "@neon/config": "^1.14.8",
+    "@neon/env": "^2.1.11"
+  }
+}

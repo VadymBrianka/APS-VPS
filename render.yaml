@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: cf-bot-server
+    runtime: docker
+    dockerfilePath: ./bot_app/Dockerfile
+    dockerContext: ./bot_app
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBAPP_URL
+        sync: false
+
+  - type: worker
+    name: cf-sync-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      - key: CF_AUTH_URL
+        sync: false
+      - key: CF_DATA_URL
+        sync: false
+      - key: CF_CLIENT_ID
+        sync: false
+      - key: CF_CLIENT_SECRET
+        sync: false
+      - key: CF_TOKEN_DURATION
+        value: "60"
+      - key: INITIAL_SINCE
+        value: "2026-10-25T00:00:00Z"
+      - key: SYNC_INTERVAL_SECONDS
+        value: "300"
+
+  - type: cron
+    name: neon-db-keepalive
+    runtime: python
+    schedule: "*/4 * * * *"
+    buildCommand: pip install psycopg2-binary
+    startCommand: python -c "import os, psycopg2; conn = psycopg2.connect(os.environ['DATABASE_URL']); cur = conn.cursor(); cur.execute('SELECT 1'); conn.close(); print('Neon keepalive OK')"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
