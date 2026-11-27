@@ -93,7 +93,8 @@ def map_type(db_type_name: str, precision: int = None, scale: int = None) -> str
 def init_database():
     """Створює службові таблиці та всі таблиці за JSON-схемами."""
     global TABLE_SCHEMAS
-    schema_files = glob.glob("schemas/*.json")
+    schemas_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schemas")
+    schema_files = glob.glob(os.path.join(schemas_dir, "*.json"))
     for file_path in schema_files:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -282,7 +283,8 @@ def sync_cycle():
         logging.error(f"Помилка під час синхронізації: {e}", exc_info=True)
 
 
-if __name__ == "__main__":
+def run_sync_loop():
+    """Запускає нескінченний цикл синхронізації (можна викликати у фоновому потоці)."""
     wait_for_postgres()
     init_database()
     logging.info(f"Сервіс запущено. Періодичність виконання: кожні {SYNC_INTERVAL_SECONDS} секунд.")
@@ -290,3 +292,7 @@ if __name__ == "__main__":
     while True:
         sync_cycle()
         time.sleep(SYNC_INTERVAL_SECONDS)
+
+
+if __name__ == "__main__":
+    run_sync_loop()

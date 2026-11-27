@@ -2307,7 +2307,17 @@ async def on_location_chosen(callback: types.CallbackQuery):
 async def main():
     await setup_database()
     await setup_bot_commands()
-    
+
+    if os.getenv("ENABLE_SYNC_WORKER", "").lower() in ("1", "true", "yes"):
+        import sys
+        import threading
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        import sync_service
+        threading.Thread(target=sync_service.run_sync_loop, daemon=True, name="sync-worker").start()
+        logging.info("Фоновий sync_worker запущено в тому ж контейнері.")
+
     polling_task = asyncio.create_task(dp.start_polling(bot))
     
     port = int(os.getenv("PORT", 8080))

@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Системні кириличні шрифти для генерації зображень-звітів
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# Встановлюємо залежності для sync_service та bot_app
+COPY requirements.txt ./requirements-sync.txt
+COPY bot_app/requirements.txt ./requirements-bot.txt
+RUN pip install --no-cache-dir -r requirements-sync.txt -r requirements-bot.txt
+
+# Копіюємо весь код проєкту
+COPY sync_service.py .
+COPY schemas/ ./schemas/
+COPY bot_app/ ./bot_app/
+
+EXPOSE 8080
+
+CMD ["python", "-u", "bot_app/bot.py"]
